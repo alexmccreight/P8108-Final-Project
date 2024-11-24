@@ -1,0 +1,31 @@
+---
+title: "Final Project - Code"
+output: pdf_document
+date: "2024-11-24"
+---
+# Data preprocessing
+```{r}
+df = read.csv("metabric.csv")
+```
+
+# Exploratory Data Analysis (EDA)
+
+# Feature Selection
+
+# Model Development
+
+## Cox PH Model
+
+### Checking PH Assumption
+
+### Model fitting
+
+## Extended Cox Model
+
+## Accelerated Failure Time (AFT) model
+
+# Validation
+
+# Outcome Analysis
+
+# Reporting
