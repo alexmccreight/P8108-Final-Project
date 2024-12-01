@@ -1,0 +1,118 @@
+---
+title: "Untitled"
+output: pdf_document
+date: "2024-12-01"
+---
+
+```{r}
+library(tidyverse)
+library(glmnet)
+library(survival)
+```
+
+```{r}
+METABRIC_RNA_Mutation <- read_csv("METABRIC_RNA_Mutation.csv")
+colnames(METABRIC_RNA_Mutation)
+
+# clinical factors
+clinical <-  METABRIC_RNA_Mutation[,1:31]
+
+clinical[] <- lapply(clinical, function(x) if(is.character(x)) as.factor(x) else x)
+
+clinical <- clinical |>
+  mutate(chemotherapy = as.factor(chemotherapy), 
+         cohort = as.factor(cohort), 
+         neoplasm_histologic_grade = as.factor(neoplasm_histologic_grade), 
+         hormone_therapy = as.factor(hormone_therapy), 
+         radio_therapy = as.factor(radio_therapy), 
+         tumor_stage = as.factor(tumor_stage)) |>
+  select(-death_from_cancer, -cohort, -er_status_measured_by_ihc, -her2_status_measured_by_snp6, -oncotree_code, -integrative_cluster) |>
+  na.omit()
+
+clinical_factor <- clinical |>
+  select(-patient_id, -overall_survival_months, -overall_survival)
+
+colnames(clinical_factor)
+clinical_data_matrix <- model.matrix(~., data = clinical_factor |> select(-age_at_diagnosis, 
+                                                                          -lymph_nodes_examined_positive,
+                                                                          -mutation_count,
+                                                                          -nottingham_prognostic_index,
+                                                                          -tumor_size))[, -1]
+
+clinical_data_matrix_cont <- as.data.frame(scale(clinical_factor|> select(age_at_diagnosis, 
+                                                                          lymph_nodes_examined_positive,
+                                                                          mutation_count,
+                                                                          nottingham_prognostic_index,
+                                                                          tumor_size)))
+
+clinical_df <- as.matrix(cbind(clinical_data_matrix, clinical_data_matrix_cont))
+
+# Survival time and event
+time <- clinical$overall_survival_months
+status <- clinical$overall_survival
+y <- Surv(time = time, event = status)
+
+# Lasso Cox with no lambda =0, without regularization = coxph_fit
+fit_clinical = glmnet(clinical_df,y,
+             alpha = 1,family = "cox") 
+plot(fit_clinical,xvar= 'lambda',label = TRUE)
+
+# CV
+set.seed(2024)
+lasso_clinical <- cv.glmnet(clinical_df, y, family = "cox", alpha = 1)
+ 
+plot(lasso_clinical)
+
+# selected clinical factors
+best_lambda_clinical <- lasso_clinical$lambda.min
+
+# final lasso fit
+final_clinical_model <- glmnet(clinical_df, y, family = "cox", alpha = 1, lambda = best_lambda_clinical)
+coefficient <- coef(lasso_clinical, best_lambda_clinical)
+selected_index <- which(as.numeric(coefficient) != 0)
+selected_features <- names(coefficient[selected_index,])
+```
+
+(1. did not included the variable "death_from_cancer", as I think it is a little bit hard to interpreat
+ 2. did not included the variable "cohort", as I think this just a group ID for patients
+ 3. did not included the variable "er_status_measured_by_ihc", as I think this may inidcate similar clinical factor as "er_status" did, so I only keep "er_status".
+ 4. did not included the variable "her2_status_measured_by_snp6", as I think this may inidcate similar clinical factor as "her2_status" did and I only keep "her2_status"
+ 5. did not included "oncotree_code", as it is a code for standardizing cancer type diagnosis from a clinical perspective assigned by another source: Memorial Sloan Kettering Cancer Center (MSK)
+ 6. did not included the variable "integrative_cluster", as it described the cancer type based on some gene expression, I think this may be redundant with selected genes. In addition, variable "3-gene_classifier_subtype" and tumor_other_histologic_subtype may also decribed cancer subtypes based on Three Gene classifier and  microscopic examination.)
+ 
+Then for clinical variables, we choose `cancer_type_detailed`, `cellularity`, `chemotherapy`, `pam50_+_claudin-low_subtype`, `her2_status`, `tumor_other_histologic_subtype`, `hormone_therapy`, `primary_tumor_laterality`, `radio_therapy`, `3-gene_classifier_subtype`, `mutation_count`, `nottingham_prognostic_index`, and `tumor_size`.
+
+# for DEG genes
+## m-RNA levels z-score for 331 genes (with subfamily? because total 489 genes)
+```{r}
+# for genes
+
+gene_expression_data <- METABRIC_RNA_Mutation[which(METABRIC_RNA_Mutation$patient_id %in% clinical$patient_id), 32:520] 
+gene_expression_data <- as.matrix(gene_expression_data)
+
+# Lasso Cox with no lambda =0, without regularization = coxph_fit
+fit = glmnet(gene_expression_data,y,
+             alpha = 1,family = "cox") 
+plot(fit,xvar= 'lambda',label = TRUE)
+
+# CV
+set.seed(2024)
+lasso_gene <- cv.glmnet(gene_expression_data, y, family = "cox", alpha = 1, nfolds = 10)
+ 
+plot(lasso_gene)
+
+# selected clinical factors
+best_lambda_gene <- lasso_gene$lambda.1se
+
+# final lasso fit
+final_gene_model <- glmnet(gene_expression_data, y, family = "cox", alpha = 1, lambda = best_lambda_gene)
+coefficient <- coef(lasso_gene, best_lambda_gene)
+selected_index <- which(as.numeric(coefficient) != 0)
+selected_genes <- names(coefficient[selected_index,])
+
+# save results
+write_rds(selected_genes, "selected_13_genes.rds")
+write_rds(selected_features, "selected_13_clinical.rds")
+```
+
+Finally selected 13 genes by 1SE method: "selected_genes" (including genes which belonged in the same family)
