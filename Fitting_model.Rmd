@@ -1,0 +1,247 @@
+---
+title: "Final model fitting / validation"
+date: "2024-12-01"
+output: pdf_document
+---
+
+# Model Data Prep
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(survival)
+library(survminer)
+library(rsample)
+
+# Load data
+METABRIC_RNA_Mutation = read_csv("metabric.csv")
+
+# Load selected covariates, adjust as necessary if these change!
+selected_clinical_vars = c(
+  "cancer_type_detailed",
+  "cellularity",
+  "chemotherapy",
+  "pam50_+_claudin-low_subtype",
+  "her2_status",
+  "tumor_other_histologic_subtype",
+  "hormone_therapy",
+  "primary_tumor_laterality",
+  "radio_therapy",
+  "3-gene_classifier_subtype",
+  "mutation_count",
+  "nottingham_prognostic_index",
+  "tumor_size"
+)
+
+selected_gene_vars = read_rds("selected_13_genes.rds")
+
+
+# Clinical variables
+clinical_data = METABRIC_RNA_Mutation |>
+  select(
+    patient_id,
+    overall_survival_months,
+    overall_survival,
+    all_of(selected_clinical_vars)
+  )
+
+# Gene expression variables
+gene_data = METABRIC_RNA_Mutation |>
+  select(patient_id, all_of(selected_gene_vars))
+
+# Merge clinical and gene data
+final_data = clinical_data |>
+  inner_join(gene_data, by = "patient_id") |>
+  na.omit()  
+
+categorical_vars = c(
+  "cancer_type_detailed",
+  "cellularity",
+  "chemotherapy",
+  "pam50_+_claudin-low_subtype",
+  "her2_status",
+  "tumor_other_histologic_subtype",
+  "hormone_therapy",
+  "primary_tumor_laterality",
+  "radio_therapy",
+  "3-gene_classifier_subtype"
+)
+
+continuous_vars = c(
+  "mutation_count",
+  "nottingham_prognostic_index",
+  "tumor_size",
+  selected_gene_vars
+)
+
+final_data[categorical_vars] = lapply(final_data[categorical_vars], as.factor)
+
+final_data[continuous_vars] = lapply(final_data[continuous_vars], as.numeric)
+```
+
+## Data split
+
+```{r}
+split = initial_split(data = final_data, prop = 0.8)
+
+training_df = training(split)
+testing_df = testing(split)
+```
+
+
+# Final Model Fitting
+
+```{r}
+# Making the survival object
+surv_obj = Surv(time = training_df$overall_survival_months, event = training_df$overall_survival)
+
+# Drop variables not needed in coxph()
+model_data = training_df |>
+  select(-patient_id, -overall_survival_months, -overall_survival)
+
+# Fitting model
+cox_model = coxph(surv_obj ~ ., data = model_data)
+
+# tumor_other_histologic gives NA's for all parameters, dropping for now
+# Adjusting model data to remove NA variable
+model_data = model_data |> 
+  select(-tumor_other_histologic_subtype)
+
+# Fitting final 
+cox_model_final = coxph(surv_obj ~ ., data = model_data)
+
+```
+
+# Check PH assumption
+
+## Using cox.zph
+
+```{r}
+
+ph_test = cox.zph(cox_model_final)
+ph_test_results = ph_test$table
+ph_test_df = as.data.frame(ph_test_results)
+
+global_test = ph_test_df[rownames(ph_test_df) == "GLOBAL", ]
+ph_test_df = ph_test_df[rownames(ph_test_df) != "GLOBAL", ]
+
+# Add a column for significance
+ph_test_df$Significant = ifelse(ph_test_df$`p` < 0.05, "*", "")
+
+# Prepare final table
+ph_test_df = ph_test_df |>
+  select(-`df`) |> 
+  mutate(chisq = round(chisq, 3),
+         p = round(p, 3))
+knitr::kable(ph_test_df)
+
+```
+
+## Visual for select variables
+
+```{r}
+# We may not need this, I just included it because we have one categorical variable which has a p-value borderline for PH assumption violation.
+test_ph = survfit(surv_obj ~ cancer_type_detailed, data = model_data)
+
+ggsurvplot(test_ph, 
+           fun = "cloglog", 
+           title = "log(-log(S(t))) vs log(t)", 
+           xlab = "log(t)", 
+           ylab = "log(-log(S(t)))")
+```
+
+
+
+# Evaluating model performance
+
+
+## Deviance Residuals
+
+```{r}
+resid_dev = residuals(cox_model_final, type = "deviance")
+
+plot(predict(cox_model_final), resid_dev,
+     xlab = "Linear Predictor",
+     ylab = "Deviance Residuals",
+     main = "Deviance Residuals vs. Linear Predictor")
+abline(h = 0, lty = 2, col = "red")
+```
+
+## Martingale Residuals
+
+```{r}
+cs_resid = -residuals(cox_model_final, type = "martingale")
+
+surv_cs = Surv(cs_resid, training_df$overall_survival)
+
+fit_cs = survfit(surv_cs ~ 1)
+
+plot(fit_cs$time, -log(fit_cs$surv),
+     xlab = "Cox-Snell Residuals",
+     ylab = "Cumulative Hazard",
+     main = "Cox-Snell Residuals Plot")
+abline(0, 1, col = "red")
+```
+
+## Evaluate on testing data
+
+### Concordance value
+```{r}
+testing_df = testing_df |> 
+  select(-tumor_other_histologic_subtype, -patient_id)
+
+surv_obj_test = Surv(time = testing_df$overall_survival_months, event = testing_df$overall_survival)
+risk_scores = predict(cox_model_final, newdata = testing_df, type = "risk")
+
+library(survcomp)
+c_index = concordance.index(
+  x = risk_scores,
+  surv.time = testing_df$overall_survival_months,
+  surv.event = testing_df$overall_survival
+)
+print(c_index$c.index)
+# saving interpretation for when work is final, 0.5 is random and 1.0 is perfect
+```
+
+
+### ROC Curve
+```{r}
+library(timeROC)
+roc_results <- timeROC(
+  T = testing_df$overall_survival_months,
+  delta = testing_df$overall_survival,
+  marker = risk_scores,
+  cause = 1,
+  times = seq(12, max(testing_df$overall_survival_months), by = 12)
+)
+
+time_points <- c(12, 72, 144, 216, 276)
+auc_values <- c(75.78, 65.78, 67.18, 69.33, 46.28)
+
+plot(time_points, auc_values,
+     type = "b",
+     xlab = "Time (Months)",
+     ylab = "AUC (%)",
+     main = "Time-Dependent ROC Curve",
+     col = "blue", pch = 16, lwd = 2)
+
+```
+
+## Parameter Interpretation, Final Model Visual and Conclusions 
+
+### Visualization of model on training data
+```{r}
+cox_surv_fit = survfit(cox_model_final, data = training_df)
+
+ggsurvplot(
+  cox_surv_fit,
+  conf.int = TRUE,
+  xlab = "Time (Months)",
+  ylab = "Estimated Survival Probability",
+  title = "Overall Survival Curve from Cox Model on Training Data",
+  ggtheme = theme_minimal()
+)
+```
+
+
+
