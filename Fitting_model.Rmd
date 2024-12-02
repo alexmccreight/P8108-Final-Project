@@ -82,6 +82,7 @@ final_data[continuous_vars] = lapply(final_data[continuous_vars], as.numeric)
 ## Data split
 
 ```{r}
+set.seed(2024)
 split = initial_split(data = final_data, prop = 0.8)
 
 training_df = training(split)
@@ -215,8 +216,8 @@ roc_results <- timeROC(
   times = seq(12, max(testing_df$overall_survival_months), by = 12)
 )
 
-time_points <- c(12, 72, 144, 216, 276)
-auc_values <- c(75.78, 65.78, 67.18, 69.33, 46.28)
+time_points <- c(12, 84, 168, 240, 312)
+auc_values <- c(78.63, 75.01, 65.70, 80.82, 33.22)
 
 plot(time_points, auc_values,
      type = "b",
