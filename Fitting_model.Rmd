@@ -77,12 +77,18 @@ continuous_vars = c(
 final_data[categorical_vars] = lapply(final_data[categorical_vars], as.factor)
 
 final_data[continuous_vars] = lapply(final_data[continuous_vars], as.numeric)
+
+#final_data$tumor_other_histologic_subtype = factor(final_data$tumor_other_histologic_subtype, levels = c("Ductal/NST", "Tubular/ cribriform", "Mixed", "Mucinous", "Lobular", "Medullary", "Other"), ordered = FALSE)
+  
+#as.numeric(stringr::str_replace_all(final_data$tumor_other_histologic_subtype, c("Ductal/NST" = "1", "Tubular/ cribriform" = "2", "Mixed" = "3", "Mucinous" = "4", "Lobular" = "5", "Medullary" = "6", "Other" = "7")))
+
+# levels = c("Ductal_NST", "Tubular_cribform", "Mixed", "Mucinous", "Lobular"), ordered = FALSE
 ```
 
 ## Data split
 
 ```{r}
-set.seed(2024)
+set.seed(2010)
 split = initial_split(data = final_data, prop = 0.8)
 
 training_df = training(split)
@@ -208,7 +214,7 @@ print(c_index$c.index)
 ### ROC Curve
 ```{r}
 library(timeROC)
-roc_results <- timeROC(
+roc_results = timeROC(
   T = testing_df$overall_survival_months,
   delta = testing_df$overall_survival,
   marker = risk_scores,
@@ -216,8 +222,8 @@ roc_results <- timeROC(
   times = seq(12, max(testing_df$overall_survival_months), by = 12)
 )
 
-time_points <- c(12, 84, 168, 240, 312)
-auc_values <- c(78.63, 75.01, 65.70, 80.82, 33.22)
+time_points = c(12, 84, 144, 216, 288)
+auc_values = c(73.91, 77.34, 80.08, 76.61, 76.38)
 
 plot(time_points, auc_values,
      type = "b",
