@@ -1,0 +1,74 @@
+---
+title: "Data Preprocessing"
+output: html_document
+date: "2024-12-03"
+---
+
+```{r}
+library(tidyverse)
+
+dat <- read.csv("METABRIC_RNA_Mutation.csv")
+
+dat_cleaned <- dat %>% 
+  mutate(type_of_breast_surgery = as.factor(na_if(type_of_breast_surgery, "")),
+         cancer_type = as.factor(cancer_type), 
+         cancer_type_detailed = as.factor(na_if(cancer_type_detailed, "")),
+         cellularity = factor(na_if(cellularity, ""), levels = c("Low", "Medium", "High")),
+         chemotherapy = as.factor(chemotherapy),
+         pam50_._claudin.low_subtype = as.factor(pam50_._claudin.low_subtype),
+         cohort = as.factor(cohort),
+         er_status_measured_by_ihc = as.factor(na_if(er_status_measured_by_ihc, "")),
+         er_status = as.factor(er_status), 
+         neoplasm_histologic_grade = as.factor(neoplasm_histologic_grade),
+         her2_status_measured_by_snp6 = factor(na_if(her2_status_measured_by_snp6, "UNDEF"), levels = c("LOSS", "NEUTRAL", "GAIN")),
+         her2_status = as.factor(her2_status),
+         tumor_other_histologic_subtype = as.factor(na_if(tumor_other_histologic_subtype, "")),
+         hormone_therapy = as.factor(hormone_therapy),
+         inferred_menopausal_state = factor(na_if(inferred_menopausal_state, ""), levels = c("Pre", "Post")),
+         integrative_cluster = as.factor(integrative_cluster),
+         primary_tumor_laterality = as.factor(na_if(primary_tumor_laterality, "")),
+         oncotree_code = as.factor(na_if(oncotree_code, "")),
+         overall_survival = as.factor(overall_survival),
+         pr_status = as.factor(pr_status),
+         radio_therapy = as.factor(radio_therapy),
+         X3.gene_classifier_subtype = as.factor(X3.gene_classifier_subtype),
+         tumor_stage = as.factor(tumor_stage),
+         death_from_cancer = as.factor(na_if(death_from_cancer, "")))
+
+write.csv(dat_cleaned, "dat_cleaned.csv", row.names = FALSE)
+```
+
+
+
+```{r}
+# # Clinical vars
+# colnames(dat[,1:31])
+# #colnames(dat[,32:ncol(dat)])
+# 
+# subset_columns <- dat[, 32:ncol(dat)]
+# 
+# # Function to calculate variance and check against threshold
+# near_zero_variance <- function(column, threshold = 0.0001) {
+#   if (is.numeric(column)) { # Check if the column is numeric
+#     return(var(column) < threshold) # Check variance
+#   } else {
+#     return(FALSE) # Non-numeric columns are skipped
+#   }
+# }
+# 
+# # Apply the function to each column
+# nzv_flags <- sapply(subset_columns, near_zero_variance)
+# 
+# # Identify columns with zero or near-zero variance
+# nzv_columns <- names(nzv_flags[nzv_flags])
+# 
+# # no zero variance or near zero variance columns
+# print(nzv_columns)
+# 
+# # no missing data in any column
+# sum(is.na(dat[, 32:ncol(dat)]))
+```
+
+
+
+
