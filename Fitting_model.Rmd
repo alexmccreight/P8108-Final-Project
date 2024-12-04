@@ -285,6 +285,9 @@ We see that the AUC stays very high for the majority of the tested interval, how
 ### Visualization of model on training data
 ```{r}
 summary(cox_model_final)
+
+# saving the model
+# write_rds(cox_model_final, "final_cox_model.rds")
 ```
 
 The final model is fairly complex with an array of dummy variables for factors and a handful of continuous variables (mostly from the genetic predictors).....
