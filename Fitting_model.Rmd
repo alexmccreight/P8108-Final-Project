@@ -6,13 +6,16 @@ output: pdf_document
 
 # Model Data Prep
 
-```{r}
+First, we extract the variables from the variable selection step and use them to filter our data appropriately.
+
+```{r, message = FALSE}
 # Load necessary libraries
 library(tidyverse)
 library(survival)
 library(survminer)
 library(rsample)
-
+```
+```{r}
 # Load data
 METABRIC_RNA_Mutation = read_csv("dat_cleaned.csv")
 
@@ -74,18 +77,14 @@ final_data[categorical_vars] = lapply(final_data[categorical_vars], as.factor)
 final_data[continuous_vars] = lapply(final_data[continuous_vars], as.numeric)
 
 final_data$overall_survival = ifelse(final_data$overall_survival == 1, 0, 1)
-
-#final_data$tumor_other_histologic_subtype = factor(final_data$tumor_other_histologic_subtype, levels = c("Ductal/NST", "Tubular/ cribriform", "Mixed", "Mucinous", "Lobular", "Medullary", "Other"), ordered = FALSE)
-  
-#as.numeric(stringr::str_replace_all(final_data$tumor_other_histologic_subtype, c("Ductal/NST" = "1", "Tubular/ cribriform" = "2", "Mixed" = "3", "Mucinous" = "4", "Lobular" = "5", "Medullary" = "6", "Other" = "7")))
-
-# levels = c("Ductal_NST", "Tubular_cribform", "Mixed", "Mucinous", "Lobular"), ordered = FALSE
 ```
 
 ## Data split
 
+Now that we have the data filtered to include only relevant predictors, we use `initial_split()` within `rsample` to create an 80/20 training/testing split on the data for model performance evaluation later.
+
 ```{r}
-set.seed(2010)
+set.seed(2008)
 split = initial_split(data = final_data, prop = 0.8)
 
 training_df = training(split)
@@ -95,34 +94,30 @@ testing_df = testing(split)
 
 # Final Model Fitting
 
+Next we fit a preliminary final model in `coxph()` before evaluating the proportional hazard assumption.
+
 ```{r}
 # Making the survival object
 surv_obj = Surv(time = training_df$overall_survival_months, event = training_df$overall_survival)
 
 # Drop variables not needed in coxph()
 model_data = training_df |>
-  select(-patient_id, -overall_survival_months, -overall_survival)
-
+  select(-patient_id, -overall_survival_months, -overall_survival) 
 # Fitting model
-cox_model = coxph(surv_obj ~ ., data = model_data)
+cox_model_working = coxph(surv_obj ~ ., data = model_data)
 
-# tumor_other_histologic gives NA's for all parameters, dropping for now
-# Adjusting model data to remove NA variable
-model_data = model_data |> 
-  select(-tumor_other_histologic_subtype)
-
-# Fitting final 
-cox_model_final = coxph(surv_obj ~ ., data = model_data)
-
+summary(cox_model_working)
 ```
+From this summary, we see that the predictor `tumor_other_histologic_subtype` produces only NAs in the data, likely due to sparsity. We will exclude it in the final model as it is not contributing.
 
 # Check PH assumption
 
 ## Using cox.zph
 
-```{r}
+We evaluate the proportional hazard assumption of our model using `cox.zph()`.
 
-ph_test = cox.zph(cox_model_final)
+```{r}
+ph_test = cox.zph(cox_model_working)
 ph_test_results = ph_test$table
 ph_test_df = as.data.frame(ph_test_results)
 
@@ -141,20 +136,65 @@ knitr::kable(ph_test_df)
 
 ```
 
+We see a number of violations in the PH assumption, we will investigate these further visually to decide on a next course of action.
+
 ## Visual for select variables
 
 ```{r}
 # We may not need this, I just included it because we have one categorical variable which has a p-value borderline for PH assumption violation.
-test_ph = survfit(surv_obj ~ cancer_type_detailed, data = model_data)
+test_ph = survfit(surv_obj ~ neoplasm_histologic_grade, data = model_data)
 
 ggsurvplot(test_ph, 
            fun = "cloglog", 
-           title = "log(-log(S(t))) vs log(t)", 
+           title = "log(-log(S(t))) vs log(t) for neoplasm_histologic_grade", 
+           xlab = "log(t)", 
+           ylab = "log(-log(S(t)))")
+
+test_ph = survfit(surv_obj ~ chemotherapy, data = model_data)
+
+ggsurvplot(test_ph, 
+           fun = "cloglog", 
+           title = "log(-log(S(t))) vs log(t) for chemotherapy", 
+           xlab = "log(t)", 
+           ylab = "log(-log(S(t)))")
+
+test_ph = survfit(surv_obj ~ her2_status, data = model_data)
+
+ggsurvplot(test_ph, 
+           fun = "cloglog", 
+           title = "log(-log(S(t))) vs log(t) for her2_status", 
            xlab = "log(t)", 
            ylab = "log(-log(S(t)))")
 ```
 
+While not all variables are included for brevity, we see that the above variables show evidence of PH assumption violation. That being said, `neoplasm_histologic_grade` looks to be the most egregious. Because it is likely time-varying, we will include an interaction term with `time` in the final model to remedy this. We will not include more interaction terms as doing so may risk over fitting to the training data. 
 
+# Fit the final model with selected covariates adjusted for time
+
+```{r}
+final_model_data = training_df |>
+  select(-patient_id, -overall_survival, -tumor_other_histologic_subtype) |> 
+  drop_na()
+
+cox_model_final = 
+  coxph(surv_obj ~  
+  cancer_type_detailed +
+  primary_tumor_laterality +
+  radio_therapy +
+  mutation_count + 
+  stat5a + 
+  gsk3b + 
+  abcb1 + 
+  flt3 + 
+  spry2 +
+  neoplasm_histologic_grade:overall_survival_months +
+  chemotherapy + 
+  pam50_._claudin.low_subtype + 
+  her2_status + 
+  hormone_therapy + 
+  X3.gene_classifier_subtype,
+  data = final_model_data)
+```
 
 # Evaluating model performance
 
@@ -171,7 +211,9 @@ plot(predict(cox_model_final), resid_dev,
 abline(h = 0, lty = 2, col = "red")
 ```
 
-## Martingale Residuals
+Ideally, we would expect to see no trend in the residuals in the deviance residual plot, however, for this model there looks to be a bit of a trend. This trend is most notable for negative linear predictor values and becomes less pronounced at positive values. This indicates that there may be certain areas where the model does not fit well.
+
+## Cox-Snell Residuals
 
 ```{r}
 cs_resid = -residuals(cox_model_final, type = "martingale")
@@ -187,13 +229,15 @@ plot(fit_cs$time, -log(fit_cs$surv),
 abline(0, 1, col = "red")
 ```
 
+Based on the Cox-Snell residuals, we see that the points initially follow the 45-degree line, but deviate significantly later. This indicates that we may have omitted covariates and/or unaddressed assumption violations that are preventing the model from capturing all relevant relationships.
+
 ## Evaluate on testing data
 
-### Concordance value
-```{r}
-#testing_df = testing_df |> 
-#  select(-tumor_other_histologic_subtype, -patient_id)
+Next we evaluate the data on the remaining 20% of data. We do so by calculating a concordance value and building a ROC curve.
 
+### Concordance value
+
+```{r}
 surv_obj_test = Surv(time = testing_df$overall_survival_months, event = testing_df$overall_survival)
 risk_scores = predict(cox_model_final, newdata = testing_df, type = "risk")
 
@@ -203,12 +247,15 @@ c_index = concordance.index(
   surv.time = testing_df$overall_survival_months,
   surv.event = testing_df$overall_survival
 )
-print(c_index$c.index)
+print(a$c.index)
 # saving interpretation for when work is final, 0.5 is random and 1.0 is perfect
 ```
 
+Concordance gives an estimate of the model's predictive capability by making pairs of individuals in the data and seeing how well the model predicts their risk. If a model accurately says an individual's risk is higher and their event happens prior to their counterpart, the pair is called concordant.  Based on the concordance value of `r c_index$c.index`, we conclude that the model is very good at predicting risks on new data.
 
 ### ROC Curve
+We fit a ROC curve showing AUC values at arbitrary time points to get a better idea of how the model performs on new data over time. This will show limitations in the model's predictive capabilities.
+
 ```{r}
 library(timeROC)
 roc_results = timeROC(
@@ -220,7 +267,7 @@ roc_results = timeROC(
 )
 
 time_points = c(12, 84, 144, 216, 288)
-auc_values = c(73.91, 77.34, 80.08, 76.61, 76.38)
+auc_values = c(99.32, 96.03, 97.17, 96.71, 73.30)
 
 plot(time_points, auc_values,
      type = "b",
@@ -231,21 +278,15 @@ plot(time_points, auc_values,
 
 ```
 
+We see that the AUC stays very high for the majority of the tested interval, however, its performance sharply declines at the end of the time interval. As such, the model has lower predictive accuracy at the end of the interval.
+
 ## Parameter Interpretation, Final Model Visual and Conclusions 
 
 ### Visualization of model on training data
 ```{r}
-cox_surv_fit = survfit(cox_model_final, data = training_df)
-
-ggsurvplot(
-  cox_surv_fit,
-  conf.int = TRUE,
-  xlab = "Time (Months)",
-  ylab = "Estimated Survival Probability",
-  title = "Overall Survival Curve from Cox Model on Training Data",
-  ggtheme = theme_minimal()
-)
+summary(cox_model_final)
 ```
 
+The final model is fairly complex with an array of dummy variables for factors and a handful of continuous variables (mostly from the genetic predictors).....
 
-
+While the model has some clear proportional hazards violations and some issues with fitting at some time intervals, it still performs very well on the test data. 
