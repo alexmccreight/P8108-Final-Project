@@ -8,11 +8,23 @@ date: "2024-12-01"
 library(tidyverse)
 library(glmnet)
 library(survival)
+library(ggplot2)
+library(splines)
+library(reshape2)
+library(nlme)
+library(survminer)
+library(geepack)
+library(ggbiplot)
+library(caret)
+library(pROC)
+library(plotROC)
+library(survivalROC)
+library(timeROC)
 ```
 
 ```{r}
 METABRIC_RNA_Mutation <- read_csv("dat_cleaned.csv")
-colnames(METABRIC_RNA_Mutation)
+# colnames(METABRIC_RNA_Mutation)
 
 # clinical factors
 clinical <-  METABRIC_RNA_Mutation[,1:31]
@@ -125,3 +137,176 @@ write_rds(selected_features, "selected_11_clinical.rds")
 ```
 
 Finally selected 5 genes by 1SE method: "selected_genes" (including genes which belonged in the same family)
+
+## risk model
+```{r}
+# Load data
+METABRIC_RNA_Mutation = read_csv("dat_cleaned.csv")
+
+# Load selected covariates, adjust as necessary if these change!
+selected_clinical_vars = c(
+  "cancer_type_detailed",
+  "chemotherapy",
+  "pam50_._claudin.low_subtype",
+  "neoplasm_histologic_grade",
+  "her2_status",
+  "tumor_other_histologic_subtype",
+  "hormone_therapy",
+  "primary_tumor_laterality",
+  "radio_therapy",
+  "X3.gene_classifier_subtype",
+  "mutation_count"
+)
+
+selected_gene_vars = read_rds("selected_5_genes.rds")
+
+
+# Clinical variables
+clinical_data = METABRIC_RNA_Mutation |>
+  select(
+    patient_id,
+    overall_survival_months,
+    overall_survival,
+    all_of(selected_clinical_vars)
+  )
+
+# Gene expression variables
+gene_data = METABRIC_RNA_Mutation |>
+  select(patient_id, all_of(selected_gene_vars))
+
+# Merge clinical and gene data
+final_data = clinical_data |>
+  inner_join(gene_data, by = "patient_id") |>
+  na.omit()  
+
+categorical_vars = c(
+  "cancer_type_detailed",
+  "chemotherapy",
+  "pam50_._claudin.low_subtype",
+  "her2_status",
+  "tumor_other_histologic_subtype",
+  "hormone_therapy",
+  "primary_tumor_laterality",
+  "radio_therapy",
+  "X3.gene_classifier_subtype"
+)
+
+continuous_vars = c(
+  "mutation_count",
+  selected_gene_vars
+)
+
+final_data[categorical_vars] = lapply(final_data[categorical_vars], as.factor)
+
+final_data[continuous_vars] = lapply(final_data[continuous_vars], as.numeric)
+
+final_data$overall_survival = ifelse(final_data$overall_survival == 1, 0, 1)
+
+# risk_score model
+final_cox_model <- readRDS("~/Documents/2024 class/survive/final_project/final_cox_model.rds")
+
+risk_scores = predict(final_cox_model, newdata = final_data, type = "risk")
+final_data$risk_scores = risk_scores
+
+final_data$risk_group <- ifelse(final_data$risk_scores > median(final_data$risk_scores), "High Risk", "Low Risk")
+
+# Kaplan-Meier 
+surv_obj <- Surv(time = final_data$overall_survival_months, event = final_data$overall_survival)
+km_fit <- survfit(surv_obj ~ risk_group, data = final_data)
+
+ggsurvplot(
+  km_fit,
+  data = final_data,
+  pval = TRUE,
+  conf.int = TRUE,
+  risk.table = TRUE,
+  legend.title = "Risk Group",
+  xlab = "Months",
+  ylab = "Overall Survival Probability",
+  ggtheme = theme_minimal()
+)
+
+# performance
+# Time-Dependent ROC Curves
+time_points <- c(12, 36, 60, 120)
+roc_time <- timeROC(
+  T = final_data$overall_survival_months,
+  delta = final_data$overall_survival,
+  marker = final_data$risk_scores,
+  cause = 1,  
+  times = time_points,
+  iid = TRUE
+)
+
+# AUC
+roc_time$AUC
+
+#plot
+colors <- c("red", "blue", "green", "orange")
+
+# 1 year
+plot(
+  roc_time, 
+  time = time_points[1], 
+  col = colors[1], 
+  title = "Time-Dependent ROC Curves", 
+  lwd = 2
+)
+
+# add others
+for (i in 2:length(time_points)) {
+  plot(
+    roc_time, 
+    time = time_points[i], 
+    col = colors[i], 
+    add = TRUE, 
+    lwd = 2
+  )
+}
+
+# legend
+legend(
+  "bottomright", 
+  legend = paste("AUC at", time_points, "Months", round(roc_time$AUC,2)), 
+  col = colors, 
+  lty = 1, 
+  lwd = 2,
+)
+```
+
+## summary
+
+### variable selection:
+To avoid constructed a too complex model that may lead to over fitting, we first performed a variable selection process to filter both clinical and genomic data.
+
+For selecting clinical variables:
+Based on the complete data, to select clinical variables that have potential effect on the survival prognostic of breast cancer patients, we performed LASSO Cox regression, which may control the complexity of model by penalty parameter $\lambda$. Among 28 clinical features. After 10 fold cross validation, we choose the $\lambda$ which reached the minimal partial likelihood deviance and finally selected 11 of them and included them in our model building part. 
+
+For selecting genome data:
+The selection process for genome data is based on the around 500 gene expression profile of a total of 1903 patients with positive overall survival month. As a result of LASSO Cox selection step with 5 fold cross validation, a total of 5 genes were selected by the optimal $\lambda$ using 1SE method. (The simplest model within the allowable error range (usually 1 standard error) corresponds to a more sparse feature selection.
+)
+
+### Outcome Analysis
+
+#### risk stratification
+
+After building the final Cox Proportional Hazards model, as mentioned before, if can be used to predict the risk of patients with breast cancer, then we applied this Cox model as a risk model and calculated the risk scores for each patients based on their own clinical data and gene expression profiles and further clustered patients into high risk and low risk group and from the survival analysis, we found significant difference in survival outcomes between these two risk groups, which may suggesting that patients with different respond to clinical treatment, heterogeneous clinical features, as well as differential expressed genes may have impacted on their survival prognosis and can be captured by our cox Proportional Hazards model. In addition, this risk model performance is evaluated by time depended ROC and AUC. Again from the result, we can see that our model performed well in patients' survival prognosis, especially for predicting the risk of patients.
+
+#### Overall outcome
+
+In conclusion, after variable selection and constructed the Cox Proportional Hazards model based on clinical and gnome data of breast cancer patients, on the one hand, we found that several clinical factors such as the mutation count of related genes in patients, tumor sub types, as well as some treatments may have significant impact on patients survival condition. In addition, the interaction between aggressive level of tumor cells and time also indicate significant influence on patients' prognosis. which may suggesting that 
+the contribution of neoplasm histologic grade to survival risk showed a downward trend overtime. In other words, this may indicate that the effect of tumor histological grade is gradually diminished during long-term follow-up.
+
+On the other hand, three out of 5 selected genes show significance based on the model estimated results, including Signal transducer and activator of transcription-5A (STAT5A), glycogen synthase kinase 3$\beta$ (gsk3b) and ATP Binding Cassette Subfamily B Member 1 (abcb1), which found to be related with acceleration of breast cancer cells motility, tumor invasion and proliferation in recent study, and may also responsible for acquired chemotherapy resistance [ref*]. 
+
+Furthermore, our cox model may also acted as a useful tool to predicted patients' risk scores and may have protential clinical applications on decision-making.
+
+ref*:
+https://breast-cancer-research.biomedcentral.com/articles/10.1186/s13058-019-1125-0
+https://pmc.ncbi.nlm.nih.gov/articles/PMC10487083/
+https://www.nature.com/articles/s41375-018-0117-x
+
+
+
+
+
