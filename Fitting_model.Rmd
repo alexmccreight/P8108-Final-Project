@@ -247,7 +247,7 @@ c_index = concordance.index(
   surv.time = testing_df$overall_survival_months,
   surv.event = testing_df$overall_survival
 )
-print(a$c.index)
+print(c_index$c.index)
 # saving interpretation for when work is final, 0.5 is random and 1.0 is perfect
 ```
 
