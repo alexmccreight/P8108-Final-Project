@@ -191,8 +191,8 @@ abline(0, 1, col = "red")
 
 ### Concordance value
 ```{r}
-testing_df = testing_df |> 
-  select(-tumor_other_histologic_subtype, -patient_id)
+#testing_df = testing_df |> 
+#  select(-tumor_other_histologic_subtype, -patient_id)
 
 surv_obj_test = Surv(time = testing_df$overall_survival_months, event = testing_df$overall_survival)
 risk_scores = predict(cox_model_final, newdata = testing_df, type = "risk")
