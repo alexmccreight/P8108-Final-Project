@@ -148,7 +148,8 @@ ggsurvplot(test_ph,
            fun = "cloglog", 
            title = "log(-log(S(t))) vs log(t) for neoplasm_histologic_grade", 
            xlab = "log(t)", 
-           ylab = "log(-log(S(t)))")
+           ylab = "log(-log(S(t)))",
+           legend.labs = c("1", "2", "3"))
 
 test_ph = survfit(surv_obj ~ chemotherapy, data = model_data)
 
@@ -216,17 +217,26 @@ Ideally, we would expect to see no trend in the residuals in the deviance residu
 ## Cox-Snell Residuals
 
 ```{r}
-cs_resid = -residuals(cox_model_final, type = "martingale")
+training_df$resid_mart = residuals(cox_model_final, type = "martingale")
 
-surv_cs = Surv(cs_resid, training_df$overall_survival)
+training_df$resid_coxsnell = -(training_df$resid_mart - training_df$overall_survival)
 
-fit_cs = survfit(surv_cs ~ 1)
+fit_coxsnell = coxph(formula = Surv(resid_coxsnell, overall_survival) ~ 1,
+                      data    = training_df,
+                      ties    = c("efron","breslow","exact")[1])
 
-plot(fit_cs$time, -log(fit_cs$surv),
-     xlab = "Cox-Snell Residuals",
-     ylab = "Cumulative Hazard",
-     main = "Cox-Snell Residuals Plot")
-abline(0, 1, col = "red")
+df_base_haz = basehaz(fit_coxsnell, centered = FALSE)
+
+ggplot(data = df_base_haz, mapping = aes(x = time, y = hazard)) +
+    geom_point() +
+    scale_x_continuous(limit = c(0,3.5)) +
+    scale_y_continuous(limit = c(0,3.5)) +
+    labs(x = "Cox-Snell Residuals",
+         y = "Cumulative Hazard",
+         title = "Cox-Snell Residuals Plot") +
+    theme_bw() + theme(legend.key = element_blank()) +
+    geom_abline(intercept = 0, slope = 1, linewidth = 0.5, color = "red")
+
 ```
 
 Based on the Cox-Snell residuals, we see that the points initially follow the 45-degree line, but deviate significantly later. This indicates that we may have omitted covariates and/or unaddressed assumption violations that are preventing the model from capturing all relevant relationships.
