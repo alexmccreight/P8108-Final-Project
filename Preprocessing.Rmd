@@ -7,6 +7,7 @@ date: "2024-12-03"
 library(tidyverse)
 library(tibble)
 library(kableExtra)
+library(naniar)
 ```
 
 ```{r}
@@ -62,10 +63,6 @@ clinical_attributes <- tribble(
   "Cancer Type",     "cancer_type, cancer_type_detailed, tumor_other_histologic_subtype, integrative_cluster, oncotre_code",
   "Treatment",              "type_of_breast_surgery, chemotherapy, hormone_therapy, radio_therapy"
 )
-
-kable(clinical_attributes, col.names = c("Category", "Attributes")) %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
-  column_spec(2, width = "30em")
 ```
 
 ```{r}
@@ -97,6 +94,29 @@ ggplot(missing_summary, aes(x = reorder(Feature, -Missing_Percentage), y = Missi
 ```
 The missing values were defined with an empty cell in this data set. After replacing the empty cell with NA in the data set distribution of missing values for each variable in clinical dataset was presented here: 
 assuming less than five percent missing values are an acceptable threshold,The cellularity has missing percentage of 40%, 26% missing percent in tumor_stage and 11% missing percent in X3.gene_classifier_subtype. These three variables present redundant data and could be removed.
+
+```{r}
+
+# Visualize missingness in the dataset
+vis_miss(clinical_dat) +
+  labs(title = "Missing Data Visualization", subtitle = "Identify Patterns in Missingness")
+
+```
+
+
+```{r}
+#clean clinical attributes
+cl_clinical_dat <- clinical_dat %>%
+  select(-"cellularity",-"tumor_stage",-"X3.gene_classifier_subtype")
+```
+
+```{r}
+# Check missing values
+sum(is.na(dat_cleaned$X3.gene_classifier))  # Count missing values
+table(cl_clinical_dat$X3.gene_classifier, useNA = "ifany")  # Frequency table including NA
+
+```
+
 ```{r}
 mrna_z_scores <- dat_cleaned %>%
   select_if(is.numeric)%>%
