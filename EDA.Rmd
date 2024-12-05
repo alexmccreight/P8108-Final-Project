@@ -166,7 +166,7 @@ treatment_vars <- c("chemotherapy", "hormone_therapy", "radio_therapy")
 plots <- lapply(treatment_vars, function(var) {
   ggplot(data = categorical_dat, aes_string(x = var, fill = "as.factor(overall_survival)")) +
     geom_bar(position = "stack", alpha = 0.8) +
-    scale_fill_manual(values = c("0" = "salmon", "1" = "skyblue"), name = "Survival Status") +
+    scale_fill_manual(values = c("0" = "red", "1" = "skyblue"), labels = c("0" = "Died","1"="Survived") , name = "Survival Status") +
     theme_minimal() +
     labs(
       title = NULL,
@@ -176,7 +176,7 @@ plots <- lapply(treatment_vars, function(var) {
 })
 
 
-# Combine the plots into a single layout with a shared title
+
 combined_plot <- wrap_plots(plots, ncol = 3) +
   plot_annotation(
     title = "The Distribution of Treatment and Survival",
@@ -186,4 +186,5 @@ combined_plot <- wrap_plots(plots, ncol = 3) +
 # Display the combined plot
 print(combined_plot)
 ```
-
+Hormonal therapy appears to be associated with higher survival rates, as most patients who received it survived.
+The group of patients who did not receive chemotherapy is larger and has a better survival rate, but this might reflect patient selection or other confounding factors.
