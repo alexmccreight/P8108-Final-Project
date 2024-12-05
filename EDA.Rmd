@@ -1,0 +1,189 @@
+---
+title: "EDA"
+author: "Ruoying Deng"
+date: "2024-12-03"
+output: html_document
+---
+```{r}
+#necessary library
+library(tibble)
+library(kableExtra)
+library(ggplot2)
+library(dplyr)
+library(ggcorrplot)
+library(patchwork)
+```
+
+```{r}
+#clean clinical attributes
+cl_clinical_dat <- clinical_dat %>%
+  select(-"cellularity",-"tumor_stage",-"X3.gene_classifier_subtype")
+```
+
+```{r}
+clinical_data_scaled <- cl_clinical_dat %>%
+  select_if(is.numeric) %>% 
+  scale() %>% 
+  as.data.frame()
+#remove patient_id
+clinical_data_scaled<-clinical_data_scaled%>%
+  select(-"patient_id")
+# Reshape the data
+clinical_data_melted <- clinical_data_scaled %>%
+  rownames_to_column("Observation") %>%
+  pivot_longer(-Observation, names_to = "Attribute", values_to = "Value")
+
+# Create the horizontal boxplot
+ggplot(clinical_data_melted, aes(x = Value, y = Attribute)) +
+  geom_boxplot(aes(fill = Attribute), outlier.color = "black", outlier.shape = 16) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 0, vjust = 1, hjust = 1),
+    axis.title.y = element_text(angle = 0)
+  ) +
+  labs(
+    title = "The Distribution of Clinical Attributes in the Dataframe",
+    x = "Range after Standardization",
+    y = "Attribute"
+  )
+```
+For the distribution of all numerical data, some of them are normally distributed like age_at_diagnosis, but most of the features are right skewed with a lot of outliers like lymph_nodes_examined_positive, mutation_count, and tumor_size. We decided to keep the outliers, as they are very important in healthcare data.
+
+
+```{r}
+variables <- c("age_at_diagnosis", "lymph_nodes_examined_positive", 
+               "mutation_count", "nottingham_prognostic_index", 
+               "overall_survival_months", "tumor_size")
+
+# Create individual density plots for each variable grouped by 'overall_survival'
+plots <- lapply(variables, function(var) {
+  ggplot(data = clinical_dat, aes_string(x = var, fill = "overall_survival")) +
+    geom_density(alpha = 0.5, color = "black") +
+    scale_fill_manual(values = c("0" = "red", "1" = "blue")) +
+    theme_minimal() +
+    labs(
+      title = paste("Density Plot of", var, "by overall_survival"),
+      x = var,
+      y = "Density",
+      fill = "overall_survival"
+    )
+})
+
+
+combined_plot <- wrap_plots(plots, ncol = 2)
+print(combined_plot)
+
+```
+
+```{r}
+# Create individual boxplots for each variable grouped by 'overall_survival'
+plots <- lapply(variables, function(var) {
+  ggplot(data = clinical_dat, aes_string(x = "overall_survival", y = var, fill = "overall_survival")) +
+    geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.shape = 16) +
+    scale_fill_manual(values = c("0" = "red", "1" = "blue")) +
+    theme_minimal() +
+    labs(
+      title = paste("Boxplot of", var, "by overall_survival"),
+      x = "Overall Survival",
+      y = var,
+      fill = "Overall Survival"
+    )
+})
+
+
+combined_plot <- wrap_plots(plots, ncol = 2)
+print(combined_plot)
+```
+```{r}
+# Calculate the correlation matrix (adjust as necessary for numeric columns only)
+correlation_matrix <- cor(clinical_data_scaled, use = "complete.obs")
+
+# Create the correlation matrix plot
+ggcorrplot(correlation_matrix, method = "circle", 
+           lab = TRUE, lab_size = 3, 
+           title = "Correlation Matrix", 
+           colors = c("red", "white", "blue"), 
+           ggtheme = theme_minimal())
+  labs(title = "Correlation Heatmap", x = "Variables", y = "Variables")
+```
+```{r}
+
+# Create the first boxplot for "Total survival time in months"
+plot1 <- ggplot(clinical_dat, aes(x = overall_survival_months, y = overall_survival, fill = as.factor(overall_survival))) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.shape = 16) +
+  scale_fill_manual(values = c("0" = "salmon", "1" = "skyblue")) +
+  theme_minimal() +
+  labs(
+    title = NULL,
+    x = "overall_survival_time",
+    y = "overall_survival"
+  )
+
+# Create the second boxplot for "Age at diagnosis"
+plot2 <- ggplot(clinical_dat, aes(x = age_at_diagnosis, y = overall_survival, fill = as.factor(overall_survival))) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.shape = 16) +
+  scale_fill_manual(values = c("0" = "salmon", "1" = "skyblue")) +
+  theme_minimal() +
+  labs(
+    title = NULL,
+    x = "age_at_diagnosis",
+    y = "overall_survival"
+  )
+
+print( plot1 + plot2 )
+
+```
+When comparing patients who survived to those who did not, distinct differences can be observed in the *age_at_diagnosis* distribution. Younger patients at the time of breast cancer diagnosis were more likely to survive. Furthermore, the interval from intervention to either death or the present is significantly longer for survivors, indicating that patients typically either die relatively early after diagnosis or live for an extended period.
+
+```{r}
+ggplot(data = clinical_dat, aes(x = tumor_size, y = tumor_stage, fill = as.factor(overall_survival))) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.shape = 16) +
+  scale_fill_manual(values = c("0" = "salmon", "1" = "skyblue"), name = "Overall Survival") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Tumor Size by Tumor Stage and Survival",
+    x = "Tumor Size",
+    y = "Tumor Stage"
+  ) +
+  theme(
+    legend.position = "right",
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 12)
+  )
+```
+As the Tumer stage increases the tumor size increases as well. Also, if lower tumor stages the probability of survival is higher than when the patient reaches the fourth stage
+
+```{r}
+# Identify categorical variables
+categorical_dat <- clinical_dat %>%
+  select_if(is.character) %>%    
+  bind_cols(clinical_dat %>% select_if(is.factor))
+
+treatment_vars <- c("chemotherapy", "hormone_therapy", "radio_therapy")
+
+# Create bar plots for each treatment variable grouped by survival
+plots <- lapply(treatment_vars, function(var) {
+  ggplot(data = categorical_dat, aes_string(x = var, fill = "as.factor(overall_survival)")) +
+    geom_bar(position = "stack", alpha = 0.8) +
+    scale_fill_manual(values = c("0" = "salmon", "1" = "skyblue"), name = "Survival Status") +
+    theme_minimal() +
+    labs(
+      title = NULL,
+      x = var,
+      y = "Number of Patients"
+    )
+})
+
+
+# Combine the plots into a single layout with a shared title
+combined_plot <- wrap_plots(plots, ncol = 3) +
+  plot_annotation(
+    title = "The Distribution of Treatment and Survival",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 14))
+  )
+
+# Display the combined plot
+print(combined_plot)
+```
+

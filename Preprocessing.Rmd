@@ -3,12 +3,19 @@ title: "Data Preprocessing"
 output: html_document
 date: "2024-12-03"
 ---
-
 ```{r}
 library(tidyverse)
+library(tibble)
+library(kableExtra)
+```
 
-dat <- read.csv("METABRIC_RNA_Mutation.csv")
+```{r}
+dat <- read.csv("/Users/viv/Desktop/Survival Analysis/METABRIC_RNA_Mutation.csv")
+```
 
+
+```{r}
+dat[dat == ""] <- NA  
 dat_cleaned <- dat %>% 
   mutate(type_of_breast_surgery = as.factor(na_if(type_of_breast_surgery, "")),
          cancer_type = as.factor(cancer_type), 
@@ -38,7 +45,80 @@ dat_cleaned <- dat %>%
 write.csv(dat_cleaned, "dat_cleaned.csv", row.names = FALSE)
 ```
 
+the dataset includes 31 clinical attributes, m-RNA levels z-score for 331 genes, and mutation in 175 genes for 1904 breast cancer patients
 
+```{r}
+#clinical attributes
+clinical_dat <-select(dat_cleaned,(1:31))
+summary(clinical_dat)
+```
+
+```{r}
+clinical_attributes <- tribble(
+  ~Category,                ~Attributes,
+  "General Info",           "patient_id, age_at_diagnosis, inferred_menopausal_state, primary_tumor_laterality",
+  "Patient Status",         "overall_survival, overall_survival_months, death_from_cancer",
+  "Tumor Info",             "pam50_._claudin.low_subtype, cellularity, er_status, neoplasm_histologic_grade, her2_status, pr_status, X3_gene_classifier_subtype, tumor_size",
+  "Cancer Type",     "cancer_type, cancer_type_detailed, tumor_other_histologic_subtype, integrative_cluster, oncotre_code",
+  "Treatment",              "type_of_breast_surgery, chemotherapy, hormone_therapy, radio_therapy"
+)
+
+kable(clinical_attributes, col.names = c("Category", "Attributes")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  column_spec(2, width = "30em")
+```
+
+```{r}
+# Calculate missing values and percentages
+missing_summary <- clinical_dat %>%
+  summarise_all(~ sum(is.na(.))) %>%
+  t() %>%
+  as.data.frame()
+
+missing_summary$Percentage <- (missing_summary$V1 / nrow(clinical_dat)) * 100
+colnames(missing_summary) <- c("Missing_Values", "Missing_Percentage")
+
+missing_summary <- missing_summary %>%
+  rownames_to_column(var = "Feature") %>%
+  arrange(desc(Missing_Percentage))
+          
+view(missing_summary)
+
+# Plot missing data percentages
+ggplot(missing_summary, aes(x = reorder(Feature, -Missing_Percentage), y = Missing_Percentage)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(
+    title = "Percentage of Missing Data by Feature",
+    x = "Feature",
+    y = "Missing Percentage (%)"
+  ) +
+  theme_minimal()
+```
+The missing values were defined with an empty cell in this data set. After replacing the empty cell with NA in the data set distribution of missing values for each variable in clinical dataset was presented here: 
+assuming less than five percent missing values are an acceptable threshold,The cellularity has missing percentage of 40%, 26% missing percent in tumor_stage and 11% missing percent in X3.gene_classifier_subtype. These three variables present redundant data and could be removed.
+```{r}
+mrna_z_scores <- dat_cleaned %>%
+  select_if(is.numeric)%>%
+  select(-c(2:14))
+view(mrna_z_scores)
+
+missing_summary2 <- mrna_z_scores%>%
+ summarise_all(~ sum(is.na(.)))%>%
+  t() %>%
+  as.data.frame()
+
+missing_summary2 <- missing_summary2 %>%
+  tibble::rownames_to_column(var = "Feature") %>%
+  rename(Missing_Values = V1) %>%
+  arrange(desc(Missing_Values))
+
+# Extract Mutation Data for 175 Genes
+mutation_data <- dat_cleaned %>%
+  select(matches("mut"))
+```
+
+The dataset for m-RNA levels z-score and mutation in dna is complete.
 
 ```{r}
 # # Clinical vars
@@ -67,7 +147,7 @@ write.csv(dat_cleaned, "dat_cleaned.csv", row.names = FALSE)
 # 
 # # no missing data in any column
 # sum(is.na(dat[, 32:ncol(dat)]))
-```
+
 
 
 
