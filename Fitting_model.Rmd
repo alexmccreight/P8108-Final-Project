@@ -9,17 +9,14 @@ output: pdf_document
 First, we extract the variables from the variable selection step and use them to filter our data appropriately.
 
 ```{r, message = FALSE}
-# Load necessary libraries
 library(tidyverse)
 library(survival)
 library(survminer)
 library(rsample)
 ```
 ```{r}
-# Load data
 METABRIC_RNA_Mutation = read_csv("dat_cleaned.csv")
 
-# Load selected covariates, adjust as necessary if these change!
 selected_clinical_vars = c(
   "cancer_type_detailed",
   "chemotherapy",
@@ -37,7 +34,6 @@ selected_clinical_vars = c(
 selected_gene_vars = read_rds("selected_5_genes.rds")
 
 
-# Clinical variables
 clinical_data = METABRIC_RNA_Mutation |>
   select(
     patient_id,
@@ -46,11 +42,9 @@ clinical_data = METABRIC_RNA_Mutation |>
     all_of(selected_clinical_vars)
   )
 
-# Gene expression variables
 gene_data = METABRIC_RNA_Mutation |>
   select(patient_id, all_of(selected_gene_vars))
 
-# Merge clinical and gene data
 final_data = clinical_data |>
   inner_join(gene_data, by = "patient_id") |>
   na.omit()  
@@ -97,13 +91,11 @@ testing_df = testing(split)
 Next we fit a preliminary final model in `coxph()` before evaluating the proportional hazard assumption.
 
 ```{r}
-# Making the survival object
 surv_obj = Surv(time = training_df$overall_survival_months, event = training_df$overall_survival)
 
-# Drop variables not needed in coxph()
 model_data = training_df |>
   select(-patient_id, -overall_survival_months, -overall_survival) 
-# Fitting model
+
 cox_model_working = coxph(surv_obj ~ ., data = model_data)
 
 summary(cox_model_working)
@@ -124,16 +116,14 @@ ph_test_df = as.data.frame(ph_test_results)
 global_test = ph_test_df[rownames(ph_test_df) == "GLOBAL", ]
 ph_test_df = ph_test_df[rownames(ph_test_df) != "GLOBAL", ]
 
-# Add a column for significance
 ph_test_df$Significant = ifelse(ph_test_df$`p` < 0.05, "*", "")
 
-# Prepare final table
 ph_test_df = ph_test_df |>
   select(-`df`) |> 
   mutate(chisq = round(chisq, 3),
          p = round(p, 3))
 knitr::kable(ph_test_df)
-
+knitr::kable(ph_test_df, format = "latex")
 ```
 
 We see a number of violations in the PH assumption, we will investigate these further visually to decide on a next course of action.
@@ -283,7 +273,7 @@ plot(time_points, auc_values,
      type = "b",
      xlab = "Time (Months)",
      ylab = "AUC (%)",
-     main = "Time-Dependent ROC Curve",
+     main = "Time-Dependent AUC Plot",
      col = "blue", pch = 16, lwd = 2)
 
 ```
@@ -300,6 +290,6 @@ summary(cox_model_final)
 # write_rds(cox_model_final, "final_cox_model.rds")
 ```
 
-The final model is fairly complex with an array of dummy variables for factors and a handful of continuous variables (mostly from the genetic predictors).....
+The final model is fairly complex with an array of dummy variables for factors and a handful of continuous variables (mostly from the genetic predictors).
 
 While the model has some clear proportional hazards violations and some issues with fitting at some time intervals, it still performs very well on the test data. 
